@@ -34,11 +34,11 @@ namespace DesktopWebRadio
         private string currentTitle = "";
         private Thread? metadataThread;
         private bool stopMetadataThread = false;
-        private readonly string discogsApiKey = "YOUR_DISCOGS_APIKEY";
-        private readonly string discogsApiSecret = "YOUR_DISCOGS_SECRET";
+        private readonly string discogsApiKey = "WOyswftoSiwyYdwyIsxy";
+        private readonly string discogsApiSecret = "qsejnMWavmoZtaGGwZaIsrHNdbCKaPfC";
         private readonly string discogsUserAgent = "DesktopWebRadio/1.0";
         private bool useDiscogs = true;
-        private readonly string lastfmApiKey = "YOUR_LASTFM_APIKEY";
+        private readonly string lastfmApiKey = "88a2d6fed6505fedbbe0d28c6d57c0eb";
         private string currentAlbumArtUrl = "";
         private readonly HttpClient httpClient;
         private List<RadioStation>? radioStations;
