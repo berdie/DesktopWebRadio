@@ -3,4 +3,4 @@
 * Modifies the color theme based on MaterialSkin options.
 * Displays audio waveform animations.
 * Displays song metadata: 'Station', 'Artist', 'Song Title', when available.
-* Displays album covers when available; clicking on the control displays an enlarged image of the cover.
+* Displays album covers when available on Discogs or Last.fm; clicking on the control displays an enlarged image of the cover.
