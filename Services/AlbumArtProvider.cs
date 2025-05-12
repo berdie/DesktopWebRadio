@@ -25,7 +25,7 @@ namespace DesktopWebRadio.Services
             httpClient.DefaultRequestHeaders.UserAgent.ParseAdd(discogsUserAgent);
         }
 
-        public async Task<string> GetAlbumArtUrl(string artist, string title, bool useDiscogs = true)
+        public async Task<string?> GetAlbumArtUrl(string artist, string title, bool useDiscogs = true)
         {
             if (string.IsNullOrEmpty(artist) || string.IsNullOrEmpty(title))
                 return null;
@@ -35,7 +35,7 @@ namespace DesktopWebRadio.Services
                 if (useDiscogs)
                 {
                     // Try Discogs API first
-                    string discogsUrl = await GetDiscogsAlbumArt(artist, title);
+                    string? discogsUrl = await GetDiscogsAlbumArt(artist, title);
                     if (!string.IsNullOrEmpty(discogsUrl))
                         return discogsUrl;
                 }
@@ -49,46 +49,77 @@ namespace DesktopWebRadio.Services
             }
         }
 
-        private async Task<string> GetDiscogsAlbumArt(string artist, string title)
+        private async Task<string?> GetDiscogsAlbumArt(string artist, string title)
         {
             try
             {
-                // Build the search query
-                string query = HttpUtility.UrlEncode($"{artist} {title}");
-                string url = $"https://api.discogs.com/database/search?q={query}&type=release&key={discogsApiKey}&secret={discogsApiSecret}";
+                // Reset HttpClient headers
+                httpClient.DefaultRequestHeaders.Clear();
+                httpClient.DefaultRequestHeaders.UserAgent.ParseAdd(discogsUserAgent);
 
-                // Make the request
+                // Discogs requires Authorization with token format
+                httpClient.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue(
+                    "Discogs", $"key={discogsApiKey}, secret={discogsApiSecret}");
+
+                // Build the search query with proper escaping
+                string query = Uri.EscapeDataString($"{artist} {title}");
+
+                // Use the correct API endpoint format
+                string url = $"https://api.discogs.com/database/search?q={query}&type=release&per_page=5";
+
+                // Add logging to track the request
+                Console.WriteLine($"Requesting Discogs API: {url}");
+
+                // Make the request with proper error handling
                 HttpResponseMessage response = await httpClient.GetAsync(url);
-                response.EnsureSuccessStatusCode();
 
-                string json = await response.Content.ReadAsStringAsync();
-                JObject result = JObject.Parse(json);
-
-                // Check if we got any results
-                JArray results = (JArray)result["results"];
-                if (results != null && results.Count > 0)
+                // Check if the response is successful
+                if (response.IsSuccessStatusCode)
                 {
-                    // Get the first result's cover image
-                    foreach (var item in results)
+                    string json = await response.Content.ReadAsStringAsync();
+                    JObject result = JObject.Parse(json);
+
+                    // Check if we got any results
+                    JArray? results = (JArray?)result["results"];
+                    if (results != null && results.Count > 0)
                     {
-                        JToken coverImageToken = item["cover_image"];
-                        if (coverImageToken != null && !string.IsNullOrEmpty(coverImageToken.ToString()))
+                        // Get the first result with a non-empty cover image
+                        foreach (var item in results)
                         {
-                            return coverImageToken.ToString();
+                            JToken? coverImageToken = item["cover_image"];
+                            if (coverImageToken != null && !string.IsNullOrEmpty(coverImageToken.ToString()))
+                            {
+                                return coverImageToken.ToString();
+                            }
                         }
                     }
                 }
+                else
+                {
+                    // Log the error details for debugging
+                    string errorContent = await response.Content.ReadAsStringAsync();
+                    Console.WriteLine($"Discogs API error: HTTP {(int)response.StatusCode} - {errorContent}");
 
-                // No suitable cover found
+                    // If we received a 429 (Too Many Requests), add a delay
+                    if (response.StatusCode == System.Net.HttpStatusCode.TooManyRequests)
+                    {
+                        await Task.Delay(2000); // Wait 2 seconds before retrying
+                    }
+                }
+
+                // No suitable cover found or error occurred
                 return null;
             }
-            catch (Exception)
+            catch (Exception ex)
             {
+                // Log the exception
+                Console.WriteLine($"Error in GetDiscogsAlbumArt: {ex.Message}");
                 return null;
             }
         }
 
-        private async Task<string> GetLastFmAlbumArt(string artist, string title)
+
+        private async Task<string?> GetLastFmAlbumArt(string artist, string title)
         {
             try
             {
@@ -105,23 +136,23 @@ namespace DesktopWebRadio.Services
                 JObject result = JObject.Parse(json);
 
                 // Navigate through the JSON response to find album art
-                JToken track = result["track"];
+                JToken? track = result["track"];
                 if (track != null)
                 {
-                    JToken album = track["album"];
+                    JToken? album = track["album"];
                     if (album != null)
                     {
-                        JArray images = (JArray)album["image"];
+                        JArray? images = (JArray?)album["image"];
                         if (images != null && images.Count > 0)
                         {
                             // Try to get the largest image available (typically the last one)
                             for (int i = images.Count - 1; i >= 0; i--)
                             {
-                                JToken image = images[i];
-                                string size = image["size"]?.ToString();
-                                string imageUrl = image["#text"]?.ToString();
+                                JToken? image = images[i];
+                                string? size = image["size"]?.ToString();
+                                string? imageUrl = image["#text"]?.ToString();
 
-                                if (!string.IsNullOrEmpty(imageUrl) && 
+                                if (!string.IsNullOrEmpty(imageUrl) &&
                                     (size == "large" || size == "extralarge" || size == "mega"))
                                 {
                                     return imageUrl;
@@ -131,7 +162,7 @@ namespace DesktopWebRadio.Services
                             // If we didn't find a large image, use any available image
                             foreach (var image in images)
                             {
-                                string imageUrl = image["#text"]?.ToString();
+                                string? imageUrl = image["#text"]?.ToString();
                                 if (!string.IsNullOrEmpty(imageUrl))
                                 {
                                     return imageUrl;

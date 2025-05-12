@@ -25,27 +25,27 @@ namespace DesktopWebRadio
     public partial class Form1 : MaterialForm
     {
         private MaterialSkinManager skinManager;
-        private WaveOutEvent waveOut;
-        private IWaveProvider mediaReader;
-        private System.Timers.Timer metadataTimer;
+        private WaveOutEvent? waveOut;
+        private IWaveProvider? mediaReader;
+        private System.Timers.Timer? metadataTimer;
         private string currentStreamUrl = "";
         private string currentStation = "";
         private string currentArtist = "";
         private string currentTitle = "";
-        private Thread metadataThread;
+        private Thread? metadataThread;
         private bool stopMetadataThread = false;
         private readonly string discogsApiKey = "NrOyUftLAOIaVamCOZcG";
-        private readonly string discogsApiSecret = "RUnYTyWArQIDXxGlGSdahiFoavNVfxkm";
+        private readonly string discogsApiSecret = "qsejnMWavmoZtaGGwZaIsrHNdbCKaPfC";
         private readonly string discogsUserAgent = "DesktopWebRadio/1.0";
         private bool useDiscogs = true;
         private readonly string lastfmApiKey = "88a2d6fed6505fedbbe0d28c6d57c0eb";
         private string currentAlbumArtUrl = "";
-        private HttpClient httpClient;
-        private List<RadioStation> radioStations;
+        private readonly HttpClient httpClient;
+        private List<RadioStation>? radioStations;
         private MusicVisualizer musicVisualizer;
-        private AudioVisualizationProvider visualizationProvider;
-        private System.Windows.Forms.Timer visualizerUpdateTimer;
-        private System.Windows.Forms.Timer scrollTimer;
+        private AudioVisualizationProvider? visualizationProvider;
+        private System.Windows.Forms.Timer? visualizerUpdateTimer;
+        private readonly System.Windows.Forms.Timer scrollTimer;
         private AlbumArtProvider albumArtProvider;
         private int scrollPosition = 0;
         private string fullMetadataText = "";
@@ -177,7 +177,7 @@ namespace DesktopWebRadio
             }
         }
 
-        private void StationComboBox_SelectedIndexChanged(object sender, EventArgs e)
+        private void StationComboBox_SelectedIndexChanged(object? sender, EventArgs e)
         {
             if (stationComboBox.SelectedIndex >= 0)
             {
@@ -187,7 +187,7 @@ namespace DesktopWebRadio
                 if (waveOut != null && waveOut.PlaybackState == PlaybackState.Playing)
                 {
                     StopPlayback();
-                    StartPlayback();
+                    _ = StartPlaybackAsync(GetVisualizerUpdateTimer());
                 }
             }
         }
@@ -196,21 +196,26 @@ namespace DesktopWebRadio
 
         #region Playback Controls
 
-        private void MaterialPlayBtn_Click(object sender, EventArgs e)
+        private void MaterialPlayBtn_Click(object? sender, EventArgs e)
         {
-            StartPlayback();
+            _ = StartPlaybackAsync(GetVisualizerUpdateTimer());
         }
 
-        private void MaterialStopBtn_Click(object sender, EventArgs e)
+        private void MaterialStopBtn_Click(object? sender, EventArgs e)
         {
             StopPlayback();
         }
 
-        private void StartPlayback()
+        private System.Windows.Forms.Timer? GetVisualizerUpdateTimer()
+        {
+            return visualizerUpdateTimer;
+        }
+
+        private async Task StartPlaybackAsync(System.Windows.Forms.Timer? visualizerUpdateTimer)
         {
             try
             {
-                if (stationComboBox.SelectedIndex < 0)
+                if (stationComboBox.SelectedIndex < 0 || radioStations == null)
                 {
                     MessageBox.Show("Please select a station first.");
                     return;
@@ -240,10 +245,10 @@ namespace DesktopWebRadio
                         try
                         {
                             // Create a buffered stream from the URL
-                            var webRequest = WebRequest.Create(currentStreamUrl);
-                            var webResponse = webRequest.GetResponse();
-                            var responseStream = webResponse.GetResponseStream();
-                            
+                            using var response = await httpClient.GetAsync(currentStreamUrl, HttpCompletionOption.ResponseHeadersRead);
+                            response.EnsureSuccessStatusCode();
+                            var responseStream = await response.Content.ReadAsStreamAsync();
+
                             // Try using MP3FileReader with stream buffering
                             var bufferedStream = new BufferedStream(responseStream, 65536); // 64KB buffer
                             mediaReader = new Mp3FileReader(bufferedStream);
@@ -258,26 +263,27 @@ namespace DesktopWebRadio
                         throw; // Re-throw if it's not an ACM error
                     }
                 }
-                
+
                 // Initialize visualization provider with error handling
                 try
                 {
                     visualizationProvider = new AudioVisualizationProvider(mediaReader);
-                    
+
                     // Connect the audio stream to the WaveOut device
                     waveOut.Init(visualizationProvider);
                     waveOut.Play();
-                    
+
                     // Start metadata monitoring
                     StartMetadataMonitoring();
-                    
+
                     // Update UI state
-                    materialPlayBtn.Enabled = false;
-                    materialStopBtn.Enabled = true;
-                    
-                    // Start the visualizer update timer
-                    visualizerUpdateTimer.Start();
-                    
+                    if (materialPlayBtn != null && materialStopBtn != null && visualizerUpdateTimer != null)
+                    {
+                        materialPlayBtn.Enabled = false;
+                        materialStopBtn.Enabled = true;
+                        visualizerUpdateTimer.Start();
+                    }
+
                     // Update the label with the station name
                     UpdateMetadataDisplay(currentStation, "", "");
                 }
@@ -359,7 +365,7 @@ namespace DesktopWebRadio
             }
         }
 
-        private void VolumeTrackBar_Scroll(object sender, EventArgs e)
+        private void VolumeTrackBar_Scroll(object? sender, EventArgs e)
         {
             if (waveOut != null)
             {
@@ -387,76 +393,46 @@ namespace DesktopWebRadio
                 {
                     try
                     {
-                        // Create a request for the stream URL to get the metadata
-                        HttpWebRequest request = (HttpWebRequest)WebRequest.Create(currentStreamUrl);
-                        request.Headers.Add("Icy-MetaData", "1");
-                        request.Timeout = 5000;
-                        request.ReadWriteTimeout = 5000; // Add read/write timeout
-
-                        using (HttpWebResponse response = (HttpWebResponse)request.GetResponse())
+                        // Usa HttpClient invece di HttpWebRequest
+                        using (var request = new HttpRequestMessage(HttpMethod.Get, currentStreamUrl))
                         {
-                            // Check for ICY metadata
-                            string icyMetaInt = response.GetResponseHeader("icy-metaint");
-                            if (!string.IsNullOrEmpty(icyMetaInt) && int.TryParse(icyMetaInt, out int metaInt))
+                            // Aggiungi l'header per i metadati Icy
+                            request.Headers.Add("Icy-MetaData", "1");
+                            request.Headers.Add("User-Agent", "DesktopWebRadio/1.0");
+
+                            // Imposta un timeout per la richiesta
+                            using (var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5)))
+                            using (var response = httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cts.Token).GetAwaiter().GetResult())
                             {
-                                byte[] buffer = new byte[metaInt];
-                                int metaLength;
+                                response.EnsureSuccessStatusCode();
 
-                                using (Stream stream = response.GetResponseStream())
+                                // Ottieni gli header Icy dalla risposta
+                                // Ottieni gli header Icy dalla risposta
+                                // In the MetadataMonitoringTask method
+                                // Ottieni gli header Icy dalla risposta
+                                if (response.Headers.TryGetValues("icy-metaint", out IEnumerable<string>? metaIntValues) &&
+                                    metaIntValues != null &&
+                                    int.TryParse(metaIntValues.FirstOrDefault(), out int metaInt))
+
                                 {
-                                    if (stream == null) throw new InvalidOperationException("Response stream is null");
+                                    byte[] buffer = new byte[metaInt];
+                                    int metaLength;
 
-                                    // Set timeout on the stream if possible
-                                    try
+                                    using (Stream stream = response.Content.ReadAsStreamAsync().GetAwaiter().GetResult())
                                     {
-                                        var timeout = stream.GetType().GetProperty("ReadTimeout");
-                                        if (timeout != null)
+                                        if (stream == null) throw new InvalidOperationException("Response stream is null");
+
+                                        try
                                         {
-                                            timeout.SetValue(stream, 5000);
-                                        }
-                                    }
-                                    catch
-                                    {
-                                        // Ignore if setting timeout isn't supported
-                                    }
+                                            // Skip initial audio data
+                                            int bytesRead = 0;
+                                            int bytesToRead = buffer.Length;
 
-                                    try
-                                {
-                                    // Skip initial audio data
-                                        int bytesRead = 0;
-                                        int bytesToRead = buffer.Length;
-
-                                        // Read in chunks to prevent hanging on slow connections
-                                        while (bytesRead < bytesToRead && !stopMetadataThread)
-                                        {
-                                            int chunkSize = Math.Min(4096, bytesToRead - bytesRead);
-                                            int read = stream.Read(buffer, bytesRead, chunkSize);
-
-                                            if (read == 0) break; // End of stream
-                                            bytesRead += read;
-                                        }
-
-                                        if (bytesRead < bytesToRead)
-                                        {
-                                            // Incomplete read - stream likely ended
-                                            throw new EndOfStreamException("Stream ended before reading complete buffer");
-                                        }
-
-                                    // Read metadata length byte
-                                    metaLength = stream.ReadByte() * 16;
-
-                                    if (metaLength > 0)
-                                    {
-                                        // Read metadata
-                                        byte[] metadataBuffer = new byte[metaLength];
-                                            bytesRead = 0;
-                                            bytesToRead = metadataBuffer.Length;
-
-                                            // Read metadata in chunks
+                                            // Read in chunks to prevent hanging on slow connections
                                             while (bytesRead < bytesToRead && !stopMetadataThread)
                                             {
-                                                int chunkSize = Math.Min(1024, bytesToRead - bytesRead);
-                                                int read = stream.Read(metadataBuffer, bytesRead, chunkSize);
+                                                int chunkSize = Math.Min(4096, bytesToRead - bytesRead);
+                                                int read = stream.Read(buffer, bytesRead, chunkSize);
 
                                                 if (read == 0) break; // End of stream
                                                 bytesRead += read;
@@ -464,74 +440,101 @@ namespace DesktopWebRadio
 
                                             if (bytesRead < bytesToRead)
                                             {
-                                                // Incomplete metadata read
-                                                throw new EndOfStreamException("Stream ended before reading complete metadata");
+                                                // Incomplete read - stream likely ended
+                                                throw new EndOfStreamException("Stream ended before reading complete buffer");
                                             }
 
-                                        // Convert metadata to string
-                                        string metadata = Encoding.ASCII.GetString(metadataBuffer);
-                                        
-                                        // Parse StreamTitle
-                                        Match match = Regex.Match(metadata, @"StreamTitle='(.*?)(';|')");
-                                        if (match.Success)
-                                        {
-                                            string streamTitle = match.Groups[1].Value;
-                                            string artist = "", title = "";
+                                            // Read metadata length byte
+                                            metaLength = stream.ReadByte() * 16;
 
-                                            // Try to split into artist and title
-                                            int separatorIndex = streamTitle.IndexOf(" - ");
-                                            if (separatorIndex > 0)
+                                            if (metaLength > 0)
                                             {
-                                                artist = streamTitle.Substring(0, separatorIndex).Trim();
-                                                title = streamTitle.Substring(separatorIndex + 3).Trim();
-                                            }
-                                            else
-                                            {
-                                                title = streamTitle.Trim();
-                                            }
+                                                // Read metadata
+                                                byte[] metadataBuffer = new byte[metaLength];
+                                                bytesRead = 0;
+                                                bytesToRead = metadataBuffer.Length;
 
-                                            // Update metadata display on UI thread
-                                            if (artist != currentArtist || title != currentTitle)
-                                            {
-                                                currentArtist = artist;
-                                                currentTitle = title;
-                                                
-                                                this.Invoke(new Action(() => 
+                                                // Read metadata in chunks
+                                                while (bytesRead < bytesToRead && !stopMetadataThread)
                                                 {
-                                                    // Update display
-                                                    UpdateMetadataDisplay(currentStation, currentArtist, currentTitle);
-                                                    
-                                                    // Fetch album art
-                                                    FetchAlbumArt(currentArtist, currentTitle);
-                                                }));
+                                                    int chunkSize = Math.Min(1024, bytesToRead - bytesRead);
+                                                    int read = stream.Read(metadataBuffer, bytesRead, chunkSize);
+
+                                                    if (read == 0) break; // End of stream
+                                                    bytesRead += read;
+                                                }
+
+                                                if (bytesRead < bytesToRead)
+                                                {
+                                                    // Incomplete metadata read
+                                                    throw new EndOfStreamException("Stream ended before reading complete metadata");
+                                                }
+
+                                                // Convert metadata to string
+                                                string metadata = Encoding.ASCII.GetString(metadataBuffer);
+
+                                                // Parse StreamTitle
+                                                Match match = Regex.Match(metadata, @"StreamTitle='(.*?)(';|')");
+                                                if (match.Success)
+                                                {
+                                                    string streamTitle = match.Groups[1].Value;
+                                                    string artist = "", title = "";
+
+                                                    // Try to split into artist and title
+                                                    int separatorIndex = streamTitle.IndexOf(" - ");
+                                                    if (separatorIndex > 0)
+                                                    {
+                                                        artist = streamTitle.Substring(0, separatorIndex).Trim();
+                                                        title = streamTitle.Substring(separatorIndex + 3).Trim();
+                                                    }
+                                                    else
+                                                    {
+                                                        title = streamTitle.Trim();
+                                                    }
+
+                                                    // Update metadata display on UI thread
+                                                    if (artist != currentArtist || title != currentTitle)
+                                                    {
+                                                        currentArtist = artist;
+                                                        currentTitle = title;
+
+                                                        this.Invoke(new Action(() =>
+                                                        {
+                                                            // Update display
+                                                            UpdateMetadataDisplay(currentStation, currentArtist, currentTitle);
+
+                                                            // Fetch album art
+                                                            FetchAlbumArt(currentArtist, currentTitle);
+                                                        }));
+                                                    }
+                                                }
                                             }
                                         }
+                                        catch (ThreadAbortException)
+                                        {
+                                            // Thread was aborted, exit the loop
+                                            break;
                                         }
-                                    }
-                                    catch (ThreadAbortException)
-                                    {
-                                        // Thread was aborted, exit the loop
-                                        break;
-                                    }
-                                    catch (EndOfStreamException eosEx)
-                                    {
-                                        // Log the error but continue - stream ended unexpectedly
-                                        Console.WriteLine($"Stream ended unexpectedly: {eosEx.Message}");
-                                    }
-                                    catch (IOException ioEx)
-                                    {
-                                        // Log the error but continue - likely a network issue
-                                        Console.WriteLine($"IO Exception in metadata thread: {ioEx.Message}");
-                                    }
-                                    catch (WebException webEx)
-                                    {
-                                        // Handle network-specific exceptions
-                                        Console.WriteLine($"Network error in metadata thread: {webEx.Message}");
-                                    }
-                                    catch (Exception ex)
-                                    {
-                                        // Log other exceptions but continue the loop
-                                        Console.WriteLine($"Error processing stream: {ex.Message}");
+                                        catch (EndOfStreamException eosEx)
+                                        {
+                                            // Log the error but continue - stream ended unexpectedly
+                                            Console.WriteLine($"Stream ended unexpectedly: {eosEx.Message}");
+                                        }
+                                        catch (IOException ioEx)
+                                        {
+                                            // Log the error but continue - likely a network issue
+                                            Console.WriteLine($"IO Exception in metadata thread: {ioEx.Message}");
+                                        }
+                                        catch (HttpRequestException httpEx)
+                                        {
+                                            // Handle HTTP-specific exceptions
+                                            Console.WriteLine($"HTTP error in metadata thread: {httpEx.Message}");
+                                        }
+                                        catch (Exception ex)
+                                        {
+                                            // Log other exceptions but continue the loop
+                                            Console.WriteLine($"Error processing stream: {ex.Message}");
+                                        }
                                     }
                                 }
                             }
@@ -542,10 +545,10 @@ namespace DesktopWebRadio
                         // Thread was aborted, exit the loop
                         break;
                     }
-                    catch (WebException webEx)
+                    catch (HttpRequestException httpEx)
                     {
-                        // Handle network-specific exceptions
-                        Console.WriteLine($"Network error in metadata thread: {webEx.Message}");
+                        // Handle HTTP-specific exceptions
+                        Console.WriteLine($"HTTP error in metadata thread: {httpEx.Message}");
                     }
                     catch (Exception ex)
                     {
@@ -574,7 +577,7 @@ namespace DesktopWebRadio
         private void UpdateMetadataDisplay(string station, string artist, string title)
         {
             string displayText = station;
-            
+
             if (!string.IsNullOrEmpty(artist) && !string.IsNullOrEmpty(title))
             {
                 displayText = $"{station} | {artist} - {title}";
@@ -606,7 +609,7 @@ namespace DesktopWebRadio
             }
         }
 
-        private void ScrollTimer_Tick(object sender, EventArgs e)
+        private void ScrollTimer_Tick(object? sender, EventArgs e)
         {
             if (fullMetadataText.Length <= 40)
             {
@@ -648,49 +651,24 @@ namespace DesktopWebRadio
 
             try
             {
-                string imageUrl = await albumArtProvider.GetAlbumArtUrl(artist, title);
-                
+                // First try with current API setting
+                string? imageUrl = await albumArtProvider.GetAlbumArtUrl(artist, title, useDiscogs);
+
                 if (!string.IsNullOrEmpty(imageUrl))
                 {
-                    using (HttpClient client = new HttpClient())
-                    {
-                        byte[] imageBytes = await client.GetByteArrayAsync(imageUrl);
-                        using (MemoryStream ms = new MemoryStream(imageBytes))
-                        {
-                            Image albumArt = Image.FromStream(ms);
-                            pictureAlbumBox.Image = albumArt;
-                            currentAlbumArtUrl = imageUrl;
-                        }
-                    }
+                    await DownloadAndDisplayImage(imageUrl);
                 }
                 else
                 {
+                    // If first API failed, try with the alternate one
+                    useDiscogs = !useDiscogs;
+                    imageUrl = await albumArtProvider.GetAlbumArtUrl(artist, title, useDiscogs);
                     pictureAlbumBox.Image = null;
                     currentAlbumArtUrl = string.Empty;
-                }
-            }
-            catch (Exception)
-            {
-                // Failed to fetch album art, try with the alternate API
-                try
-                {
-                    // Switch API provider
-                    useDiscogs = !useDiscogs;
-                    
-                    string imageUrl = await albumArtProvider.GetAlbumArtUrl(artist, title, useDiscogs);
-                    
+
                     if (!string.IsNullOrEmpty(imageUrl))
                     {
-                        using (HttpClient client = new HttpClient())
-                        {
-                            byte[] imageBytes = await client.GetByteArrayAsync(imageUrl);
-                            using (MemoryStream ms = new MemoryStream(imageBytes))
-                            {
-                                Image albumArt = Image.FromStream(ms);
-                                pictureAlbumBox.Image = albumArt;
-                                currentAlbumArtUrl = imageUrl;
-                            }
-                        }
+                        await DownloadAndDisplayImage(imageUrl);
                     }
                     else
                     {
@@ -698,15 +676,42 @@ namespace DesktopWebRadio
                         currentAlbumArtUrl = string.Empty;
                     }
                 }
-                catch
-                {
-                    pictureAlbumBox.Image = null;
-                    currentAlbumArtUrl = string.Empty;
-                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Error fetching album art: {ex.Message}");
+                pictureAlbumBox.Image = null;
+                currentAlbumArtUrl = string.Empty;
             }
         }
 
-        private void PictureAlbumBox_Click(object sender, EventArgs e)
+        private async Task DownloadAndDisplayImage(string imageUrl)
+        {
+            try
+            {
+                using (HttpClient client = new HttpClient())
+                {
+                    // Set a timeout to prevent hanging
+                    client.Timeout = TimeSpan.FromSeconds(10);
+
+                    byte[] imageBytes = await client.GetByteArrayAsync(imageUrl);
+                    using (MemoryStream ms = new MemoryStream(imageBytes))
+                    {
+                        Image albumArt = Image.FromStream(ms);
+                        pictureAlbumBox.Image = albumArt;
+                        currentAlbumArtUrl = imageUrl;
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Error downloading image: {ex.Message}");
+                throw; // Re-throw to be caught by the calling method
+            }
+        }
+
+
+        private void PictureAlbumBox_Click(object? sender, EventArgs e)
         {
             if (pictureAlbumBox.Image != null)
             {
@@ -736,7 +741,7 @@ namespace DesktopWebRadio
 
         #region Theme Handling
 
-        private void MaterialThemeBtn_Click(object sender, EventArgs e)
+        private void MaterialThemeBtn_Click(object? sender, EventArgs e)
         {
             using (ThemeSettingsForm themeForm = new ThemeSettingsForm(skinManager))
             {
@@ -774,9 +779,10 @@ namespace DesktopWebRadio
             visualizerPanel.Invalidate();
         }
 
-        private void VisualizerModeComboBox_SelectedIndexChanged(object sender, EventArgs e)
+        // Update the VisualizerModeComboBox_SelectedIndexChanged method to check for null
+        private void VisualizerModeComboBox_SelectedIndexChanged(object? sender, EventArgs e)
         {
-            if (musicVisualizer != null)
+            if (musicVisualizer != null && visualizerModeComboBox.SelectedItem != null)
             {
                 switch (visualizerModeComboBox.SelectedItem.ToString())
                 {
@@ -796,36 +802,39 @@ namespace DesktopWebRadio
             }
         }
 
-        private void VisualizerUpdateTimer_Tick(object sender, EventArgs e)
+
+        // Replace the VisualizerUpdateTimer_Tick method
+        private void VisualizerUpdateTimer_Tick(object? sender, EventArgs e)
         {
             try
             {
-            if (visualizationProvider != null && musicVisualizer != null)
-            {
-                float[] fftData = visualizationProvider.GetFFTData();
-                    if (fftData != null && fftData.Length > 0)
+                if (visualizationProvider != null && musicVisualizer != null)
                 {
-                        // Apply amplification to make visualization more visible
+                    float[]? fftData = visualizationProvider.GetFFTData();
+                    if (fftData != null && fftData.Length > 0)
+                    {
+                        // Apply amplification to make visualization more visible  
                         for (int i = 0; i < fftData.Length; i++)
                         {
-                            // Scale low values up significantly for better visibility
-                            // Apply an aggressive amplification with a log curve
+                            // Scale low values up significantly for better visibility  
+                            // Apply an aggressive amplification with a log curve  
                             fftData[i] = (float)Math.Min(1.0f, Math.Log10(1 + fftData[i] * 50) * 0.8f);
                         }
-                        
-                    musicVisualizer.UpdateFFTData(fftData);
-                        
-                        // Force redraw of the panel
+
+                        musicVisualizer.UpdateFFTData(fftData);
+
+                        // Force redraw of the panel  
                         visualizerPanel.Invalidate();
                     }
                 }
             }
             catch (Exception ex)
             {
-                // Just log errors but don't crash on visualization issues
+                // Just log errors but don't crash on visualization issues  
                 Console.WriteLine($"Error updating visualizer: {ex.Message}");
             }
         }
+
 
         #endregion
 
